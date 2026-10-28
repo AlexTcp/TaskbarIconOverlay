@@ -121,3 +121,8 @@ $RECYCLE.BIN/
 
 # Application specific - keep config.example.json but ignore config.json
 config.json
+
+# Companion VS Code extension build output
+node_modules/
+vscode-extension/out/
+*.vsix

@@ -8,6 +8,7 @@ using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 using Microsoft.Win32;
+using TaskbarIconOverlay.Peacock;
 
 class Program
 {
@@ -29,6 +30,8 @@ class Program
 
     static NotifyIcon? _trayIcon;
 
+    static PeacockManager? _peacock;
+
     static bool IsIgnoredProcess(string processName)
     {
         foreach (var ignored in IgnoredProcessNames)
@@ -42,6 +45,7 @@ class Program
     [STAThread]
     static void Main(string[] args)
     {
+        Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
 
@@ -99,10 +103,32 @@ class Program
 
         contextMenu.Items.Add(new ToolStripSeparator());
 
+        var config = LoadConfig();
+
+        var peacockItem = new ToolStripMenuItem("Peacock Colours (VS Code)");
+        peacockItem.Checked = config.PeacockEnabled;
+        peacockItem.Click += (s, e) =>
+        {
+            var item = (ToolStripMenuItem)s!;
+            item.Checked = !item.Checked;
+            if (item.Checked)
+                StartPeacock(config.PeacockStyle);
+            else
+                StopPeacock();
+        };
+        contextMenu.Items.Add(peacockItem);
+
+        var peacockStatusItem = new ToolStripMenuItem("Peacock Status...");
+        peacockStatusItem.Click += (s, e) => ShowPeacockStatus();
+        contextMenu.Items.Add(peacockStatusItem);
+
+        contextMenu.Items.Add(new ToolStripSeparator());
+
         var exitItem = new ToolStripMenuItem("Exit");
         exitItem.Click += (s, e) =>
         {
             StopPolling();
+            StopPeacock();
             _trayIcon.Visible = false;
             Application.Exit();
         };
@@ -112,6 +138,13 @@ class Program
 
         // Double-click to apply overlays
         _trayIcon.DoubleClick += (s, e) => ApplyOverlaysWithNotification();
+
+        // Colour VS Code windows from their Peacock colours (needs the companion extension)
+        if (config.PeacockEnabled)
+            StartPeacock(config.PeacockStyle);
+
+        // Restore VS Code icons however the message loop ends; our icon handles die with us
+        Application.ApplicationExit += (s, e) => StopPeacock();
 
         // Apply overlays on startup
         ApplyOverlaysWithNotification();
@@ -171,6 +204,10 @@ class Program
 
             // Skip ignored system processes for efficiency
             if (IsIgnoredProcess(processName))
+                return true;
+
+            // The Peacock integration owns this window's overlay
+            if (_peacock?.OwnsOverlay(hWnd) == true)
                 return true;
 
             // Determine the icon name to use
@@ -252,11 +289,52 @@ class Program
             Marshal.ReleaseComObject(taskbarObj);
         }
 
+        _peacock?.InvalidateOverlays();
+
         _trayIcon?.ShowBalloonTip(
             2000,
             "TaskbarIconOverlay",
             "All overlays removed.",
             ToolTipIcon.Info);
+    }
+
+    static void StartPeacock(PeacockStyle style)
+    {
+        if (_peacock != null) return;
+        try
+        {
+            _peacock = new PeacockManager(style);
+            _peacock.StatusChanged += summary => SetTrayText(summary);
+            _peacock.TaskbarRestarted += () => ApplyOverlays();
+            _peacock.Start();
+        }
+        catch (Exception ex)
+        {
+            _peacock?.Dispose();
+            _peacock = null;
+            _trayIcon?.ShowBalloonTip(3000, "TaskbarIconOverlay", "Peacock integration failed to start: " + ex.Message, ToolTipIcon.Warning);
+        }
+    }
+
+    static void StopPeacock()
+    {
+        _peacock?.Dispose();
+        _peacock = null;
+        SetTrayText(null);
+    }
+
+    static void ShowPeacockStatus()
+    {
+        string text = _peacock?.BuildStatusReport()
+            ?? "Peacock integration is turned off. Enable \"Peacock Colours (VS Code)\" in this menu.";
+        MessageBox.Show(text, "TaskbarIconOverlay – Peacock Status", MessageBoxButtons.OK, MessageBoxIcon.Information);
+    }
+
+    static void SetTrayText(string? detail)
+    {
+        if (_trayIcon == null) return;
+        string text = detail == null ? "TaskbarIconOverlay" : "TaskbarIconOverlay\n" + detail;
+        _trayIcon.Text = text.Length > 127 ? text[..127] : text;
     }
 
     const string StartupRegistryKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -313,11 +391,20 @@ class Program
         try
         {
             string json = File.ReadAllText(ConfigFilePath);
-            var config = JsonSerializer.Deserialize<Config>(json);
+            var config = JsonSerializer.Deserialize<Config>(json, new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true,
+                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+            });
 
-            if (config == null || string.IsNullOrWhiteSpace(config.IconsPath))
+            if (config == null)
             {
                 return new Config { IconsPath = defaultIconsDir };
+            }
+
+            if (string.IsNullOrWhiteSpace(config.IconsPath))
+            {
+                config.IconsPath = defaultIconsDir;
             }
 
             // If the path is relative, make it relative to the exe directory
@@ -457,12 +544,12 @@ class Program
     [ComImport]
     [Guid("56FDF344-FD6D-11d0-958A-006097C9A090")]
     [ClassInterface(ClassInterfaceType.None)]
-    class CTaskbarList { }
+    internal class CTaskbarList { }
 
     [ComImport]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
     [Guid("EA1AFB91-9E28-4B86-90E9-9E9F8A5EEFAF")] // <-- correct IID
-    interface ITaskbarList3
+    internal interface ITaskbarList3
     {
         // ITaskbarList
         void HrInit();
@@ -489,7 +576,7 @@ class Program
         void SetThumbnailClip(IntPtr hwnd, IntPtr prcClip);
     }
 
-    enum TBPFLAG
+    internal enum TBPFLAG
     {
         TBPF_NOPROGRESS = 0,
         TBPF_INDETERMINATE = 0x1,
@@ -502,4 +589,10 @@ class Program
 class Config
 {
     public string IconsPath { get; set; } = "icons";
+
+    /// <summary>Colour VS Code taskbar icons from Peacock (requires the companion extension).</summary>
+    public bool PeacockEnabled { get; set; } = true;
+
+    /// <summary>Icon (recolour the VS Code logo), Overlay (badge) or IconAndOverlay.</summary>
+    public PeacockStyle PeacockStyle { get; set; } = PeacockStyle.Icon;
 }

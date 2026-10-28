@@ -1,3 +1,5 @@
 {
-  "IconsPath": "C:\\Path\\To\\Your\\Icons"
+  "IconsPath": "C:\Path\To\Your\Icons",
+  "PeacockEnabled": true,
+  "PeacockStyle": "Icon"
 }

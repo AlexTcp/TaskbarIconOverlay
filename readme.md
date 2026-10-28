@@ -2,6 +2,8 @@
 
 A Windows utility that applies custom overlay icons to taskbar buttons based on window titles or process names.  Optimized for VS Code/VSCodium.
 
+**New:** each VS Code window's taskbar icon can take on its [Peacock](https://github.com/johnpapa/vscode-peacock) colour automatically. The VS Code logo itself is recoloured, and it works with Remote SSH. See [Peacock Colours for VS Code](#peacock-colours-for-vs-code).
+
 ![Screenshot](screenshot.png)
 
 ## Motivation
@@ -41,7 +43,11 @@ If you want to use a different location, create a `config.json` file in the same
 }
 ```
 
-- `iconsPath`: Directory containing your `.ico` files (relative to the executable, defaults to `icons`)
+- `IconsPath`: Directory containing your `.ico` files (relative to the executable, defaults to `icons`)
+- `PeacockEnabled`: Colour VS Code taskbar icons from Peacock (default `true`; also toggled from the tray menu)
+- `PeacockStyle`: `Icon` (recolour the VS Code logo, default), `Overlay` (small coloured badge) or `IconAndOverlay`
+
+Setting names are case-insensitive.
 
 ### Icon Naming
 
@@ -70,6 +76,108 @@ The tool includes special handling for Visual Studio Code and VSCodium:
 
 This allows different VS Code windows to have different overlay icons based on which project you're working on.
 
+## Peacock Colours for VS Code
+
+If you run several VS Code windows with ungrouped taskbar buttons and colour them with
+[Peacock](https://github.com/johnpapa/vscode-peacock), TaskbarIconOverlay can recolour each
+window's taskbar icon to its Peacock colour. A red Peacock window gets a red VS Code logo, a
+green one a green logo, and changing the colour updates the icon within a second.
+
+![Recoloured VS Code taskbar icons](docs/peacock-taskbar.png)
+
+### Install
+
+1. **Install the companion extension** (one `.vsix`, installed in your local VS Code):
+   ```powershell
+   cd vscode-extension
+   npm install
+   npm run package          # creates taskbar-icon-overlay-peacock-1.0.0.vsix
+   code --install-extension taskbar-icon-overlay-peacock-1.0.0.vsix
+   ```
+   Or in VS Code: *Extensions* → `...` → *Install from VSIX...*. It is a UI extension,
+   so it runs on Windows even in Remote SSH windows. You don't install anything on your
+   SSH hosts.
+2. **Run TaskbarIconOverlay** (see Quick Start). Peacock integration is on by default.
+3. Open or reload your VS Code windows. Their taskbar icons take their Peacock colours.
+
+No per-workspace configuration, icon files or colour lists are needed.
+
+### How it works
+
+```
+VS Code window (local UI extension host)          TaskbarIconOverlay (Windows)
+────────────────────────────────────────          ─────────────────────────────────────────
+reads the effective Peacock colour through        watches %LOCALAPPDATA%\TaskbarIconOverlay\sessions
+the VS Code configuration API (Remote SSH too) ─► matches each report to a taskbar window
+writes <session>.session.json atomically          recolours the VS Code logo (WM_SETICON)
+(one file per window, deleted on close)           or adds an overlay badge (ITaskbarList3)
+```
+
+**Colour resolution** mirrors Peacock's source code:
+* Remote windows use `peacock.remoteColor`, falling back to `peacock.color`. Local windows use `peacock.color`.
+* If Peacock has applied colours to the workspace's `workbench.colorCustomizations`
+  (activity bar → status bar → title bar, with Peacock's lighten/darken adjustments undone),
+  that applied colour wins, because it is what the window actually shows.
+* Hex, named colours (`red`, `rebeccapurple`), `rgb()`, `hsl()` and `hsv()` are supported.
+* If there is no effective colour, the window's icon is left unchanged.
+
+**Window matching** never guesses:
+* VS Code's extension API does not expose a native window handle. The extension reports
+  `vscode.workspace.name`, which VS Code computes with the same function as the
+  `${rootName}` part of the window title, including the ` [SSH: host]` suffix. So
+  `api [SSH: alpha]` and `api [SSH: beta]` are told apart by their titles.
+* A window is coloured only if its workspace name appears as a whole title segment in
+  exactly one VS Code window, and no other reporting window claims that title. Dirty
+  markers and changing editor names don't matter.
+* When titles are identical (same folder name on the same host, or a custom
+  `window.title` without `${rootName}`), switch to the window once (Alt+Tab or click).
+  The extension reports the moment it gains focus, and TaskbarIconOverlay attributes
+  that to the Windows foreground window. Rapid switching is rejected as ambiguous.
+* Only windows owned by the same VS Code main process as the reporting extension host
+  are considered (VS Code, Insiders and VSCodium never mix). All windows of one VS Code
+  share a process, so the process ID alone is never used to pick a window.
+
+**Lifecycle:** the extension deletes its file when the window closes or reloads. Files
+left by crashed or killed windows are detected (process gone or PID reused) and removed.
+When a window's report disappears its icon is restored after a few seconds, so a reload
+doesn't flicker. On exit, or when the integration is switched off, every icon is
+restored. Explorer restarts (`TaskbarCreated`) re-apply everything.
+
+### Tray menu
+
+* **Peacock Colours (VS Code)**: switch the integration on or off (restores icons when off).
+* **Peacock Status...**: per-window diagnostics: reported colour and its source, how the
+  window was matched, and why a window is not coloured (ambiguous, no colour, extension not
+  reporting). The same text is written to `%LOCALAPPDATA%\TaskbarIconOverlay\peacock-status.txt`.
+* The tray tooltip shows a one-line summary such as `Peacock: 7 coloured, 1 unmatched`.
+
+In VS Code, **Taskbar Icon Overlay: Show Peacock Taskbar Status** shows what that window
+reports. Set `"taskbarIconOverlay.enabled": false` to exclude a window or workspace.
+
+### Privacy
+
+Each session file contains: the workspace name shown in the title bar, the SSH host label,
+a hash of the workspace URI (not the path), the colour, process IDs and timestamps. It
+contains no source code, file paths or credentials, and nothing leaves your machine.
+
+### Limitations
+
+* **Full-icon recolouring** uses `WM_SETICON` on VS Code's window. On Windows 11 25H2 with
+  Windhawk's ungrouped taskbar this was verified to replace the taskbar button icon. Other
+  taskbar configurations (e.g. Windows' own *combine buttons*) may show the group's icon
+  instead. In that case use `"PeacockStyle": "Overlay"` or `"IconAndOverlay"`.
+* The recoloured icon handles belong to TaskbarIconOverlay. If it is **killed** (not exited
+  normally), coloured windows may show a blank icon until it is started again or the window
+  is reopened. Exiting from the tray restores all icons.
+* Windows with identical titles stay uncoloured until you switch to each one once. The
+  status window says which ones.
+* Windows that VS Code opened before TaskbarIconOverlay started are matched by title right
+  away. Focus-based identification needs one focus switch after TaskbarIconOverlay starts.
+* The extension has to be installed in each VS Code profile you use.
+
+A step-by-step manual test, including three simultaneous Remote SSH workspaces, is in
+[docs/peacock-manual-test.md](docs/peacock-manual-test.md).
+
 ## How to Develop & Test
 
 To test the program during development without building an executable:
@@ -82,6 +190,14 @@ To test the program during development without building an executable:
 ```powershell
 dotnet run
 ```
+
+**Run the tests:**
+```powershell
+dotnet test tests/TaskbarIconOverlay.Tests      # C#: matching, focus correlation, colours, icons, cache
+cd vscode-extension; npm install; npm test        # TypeScript: Peacock precedence, colour parsing, identity, state files
+```
+
+The companion extension needs Node.js 18+ to build. `npm run package` creates the `.vsix`.
 
 ### How to Compile
 
