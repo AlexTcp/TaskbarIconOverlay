@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "4242-a1b2c3d4",
+  "pid": 4242,
+  "ppid": 1000,
+  "processStartMs": 1793190000000,
+  "appName": "Visual Studio Code",
+  "workspaceName": "api [SSH: build-01]",
+  "workspaceKind": "folder",
+  "workspaceId": "0123456789abcdef",
+  "remoteName": "ssh-remote",
+  "remoteHost": "build-01",
+  "titleNameMode": "rootName",
+  "titleSeparator": " - ",
+  "color": "#832561",
+  "colorSource": "peacock.remoteColor",
+  "colorReason": null,
+  "focused": true,
+  "focusedAtMs": 1793190005000,
+  "updatedAtMs": 1793190005001
+}

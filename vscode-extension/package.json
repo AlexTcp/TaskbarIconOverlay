@@ -1,0 +1,70 @@
+{
+  "name": "taskbar-icon-overlay-peacock",
+  "displayName": "Taskbar Icon Overlay – Peacock Bridge",
+  "description": "Reports each window's effective Peacock colour to TaskbarIconOverlay so Windows taskbar buttons match. Works with Remote SSH.",
+  "version": "1.0.0",
+  "publisher": "taskbar-icon-overlay",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexTcp/TaskbarIconOverlay"
+  },
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "peacock",
+    "taskbar",
+    "windows",
+    "remote-ssh"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Only reads Peacock colour settings; never runs workspace code."
+    },
+    "virtualWorkspaces": true
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "taskbarIconOverlay.showStatus",
+        "title": "Show Peacock Taskbar Status",
+        "category": "Taskbar Icon Overlay"
+      }
+    ],
+    "configuration": {
+      "title": "Taskbar Icon Overlay",
+      "properties": {
+        "taskbarIconOverlay.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Report this window's Peacock colour to TaskbarIconOverlay so its Windows taskbar icon is coloured to match."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p .",
+    "watch": "tsc -watch -p .",
+    "test": "tsc -p . && node --test out/test/*.test.js",
+    "package": "vsce package --no-dependencies",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "1.75.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.9.3"
+  }
+}
