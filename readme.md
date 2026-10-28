@@ -121,6 +121,16 @@ writes <session>.session.json atomically          recolours the VS Code logo (WM
 * Hex, named colours (`red`, `rebeccapurple`), `rgb()`, `hsl()` and `hsv()` are supported.
 * If there is no effective colour, the window's icon is left unchanged.
 
+**Icon appearance:** the VS Code logo isn't one flat blue. It has a large light panel, a
+mid-tone and a darker fold. TaskbarIconOverlay finds the logo's main shade (its largest
+area of similar brightness, the big right-hand panel) and paints it **exactly** your Peacock
+colour, e.g. `#6e3734` in Peacock gives `#6e3734` pixels in the icon. The lighter and darker
+parts keep their brightness difference from the main shade. That difference is only reduced
+when it would go past pure black or white, so very dark or very light colours have flatter
+shading. Near-black and near-white colours also get a thin contrasting outline so the icon
+stays visible on both dark and light taskbars. The logo's outline and transparency are
+unchanged. Generated icons are cached per colour and size and reused.
+
 **Window matching** never guesses:
 * VS Code's extension API does not expose a native window handle. The extension reports
   `vscode.workspace.name`, which VS Code computes with the same function as the

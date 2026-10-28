@@ -39,6 +39,26 @@ public class IconRecolorerTests
         Assert.Equal(src[8 * Size + 8], dst[8 * Size + 8]); // white highlight untouched
     }
 
+    [Theory]
+    [InlineData(0x6e, 0x37, 0x34)]
+    [InlineData(0x29, 0x29, 0x29)]
+    [InlineData(0xe6, 0xe6, 0xe6)]
+    [InlineData(0xb8, 0x73, 0x33)]
+    public void Main_shade_becomes_exactly_the_target_colour(int r, int g, int b)
+    {
+        // Large light panel (the main shade) plus a smaller dark fold, like VS Code's logo.
+        var src = new uint[Size * Size];
+        for (int y = 2; y < 14; y++)
+        for (int x = 2; x < 14; x++)
+            src[y * Size + x] = Argb(255, x < 5 ? new PeacockColor(0x00, 0x77, 0xb9) : new PeacockColor(0x24, 0xac, 0xf2));
+        var target = new PeacockColor((byte)r, (byte)g, (byte)b);
+
+        var dst = IconRecolorer.Recolor(src, Size, target);
+
+        Assert.Equal(Argb(255, target), dst[5 * Size + 10]);
+        Assert.NotEqual(dst[5 * Size + 10], dst[5 * Size + 3]); // fold keeps a distinct shade
+    }
+
     [Fact]
     public void Keeps_the_logos_relative_shading()
     {

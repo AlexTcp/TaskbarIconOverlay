@@ -9,9 +9,10 @@ internal static class IconRecolorer
     const double HueTolerance = 45;
 
     /// <summary>
-    /// Replaces the icon's dominant hue (VS Code's blue) with <paramref name="target"/>, keeping
-    /// the silhouette, transparency and the logo's light/dark shading. Pixels in other hues are
-    /// left untouched. Icons with no dominant hue are tinted entirely.
+    /// Replaces the icon's dominant hue (VS Code's blue) with <paramref name="target"/>. The
+    /// logo's main shade becomes exactly the target colour; its lighter and darker shades,
+    /// silhouette and transparency are kept. Pixels in other hues are left untouched. Icons
+    /// with no dominant hue are tinted entirely.
     /// </summary>
     public static uint[] Recolor(uint[] source, int size, PeacockColor target)
     {
@@ -46,34 +47,39 @@ internal static class IconRecolorer
                 : true;
         }
 
-        // Reference saturation/lightness of the selected region, and its lightness spread.
-        double refS = 0, refL = 0, w2 = 0;
-        for (int i = 0; i < n; i++)
-        {
-            if (!selected[i]) continue;
-            double w = (byte)(source[i] >> 24) / 255.0;
-            refS += hsl[i].S * w;
-            refL += hsl[i].L * w;
-            w2 += w;
-        }
         var result = (uint[])source.Clone();
-        if (w2 == 0) return result;
-        refS /= w2;
-        refL /= w2;
+        var (refBin, refS, refL) = MainShade(source, hsl, selected);
+        if (refBin < 0) return result;
 
-        double spread = 0;
+        // The logo's main shade (its largest flat area, e.g. VS Code's big right-hand panel)
+        // becomes exactly the target colour. Lighter and darker shades keep their offset from
+        // it, compressed separately on each side only as much as needed to stay in [0, 1].
+        double maxUp = 0, maxDown = 0;
         for (int i = 0; i < n; i++)
-            if (selected[i]) spread = Math.Max(spread, Math.Abs(hsl[i].L - refL));
-        // Keep the logo's shading but compress it so it stays within [0, 1] around the target.
-        double room = Math.Min(targetL, 1 - targetL);
-        double scale = spread > 1e-6 ? Math.Min(1, Math.Max(room, 0.04) / spread) : 1;
+        {
+            if (!selected[i]) continue;
+            double d = hsl[i].L - refL;
+            if (d > maxUp) maxUp = d;
+            if (-d > maxDown) maxDown = -d;
+        }
+        double scaleUp = maxUp > 1e-6 ? Math.Min(1, (1 - targetL) / maxUp) : 1;
+        double scaleDown = maxDown > 1e-6 ? Math.Min(1, targetL / maxDown) : 1;
 
         for (int i = 0; i < n; i++)
         {
             if (!selected[i]) continue;
-            double s = targetS == 0 ? 0 : Math.Clamp(refS > 1e-6 ? hsl[i].S / refS * targetS : targetS, 0, 1);
-            double l = Math.Clamp(targetL + (hsl[i].L - refL) * scale, 0, 1);
-            var c = PeacockColor.FromHsl(targetH, s, l);
+            PeacockColor c;
+            if (LightnessBin(hsl[i].L) == refBin)
+            {
+                c = target;
+            }
+            else
+            {
+                double s = targetS == 0 ? 0 : Math.Clamp(refS > 1e-6 ? hsl[i].S / refS * targetS : targetS, 0, 1);
+                double d = hsl[i].L - refL;
+                double l = Math.Clamp(targetL + d * (d > 0 ? scaleUp : scaleDown), 0, 1);
+                c = PeacockColor.FromHsl(targetH, s, l);
+            }
             result[i] = (source[i] & 0xFF000000) | ((uint)c.R << 16) | ((uint)c.G << 8) | c.B;
         }
 
@@ -84,6 +90,36 @@ internal static class IconRecolorer
             AddOutline(result, size, target.ContrastingColor(), 0xB0);
 
         return result;
+    }
+
+    const double BinWidth = 0.05;
+
+    static int LightnessBin(double l) => (int)Math.Min(l / BinWidth, 1 / BinWidth - 1);
+
+    /// <summary>
+    /// The most common lightness band among the selected pixels (weighted by opacity), with the
+    /// mean saturation and lightness inside it. Returns bin -1 when nothing is selected.
+    /// </summary>
+    static (int Bin, double S, double L) MainShade(uint[] source, (double H, double S, double L)[] hsl, bool[] selected)
+    {
+        int bins = (int)Math.Round(1 / BinWidth);
+        var weight = new double[bins];
+        var sumS = new double[bins];
+        var sumL = new double[bins];
+        for (int i = 0; i < source.Length; i++)
+        {
+            if (!selected[i]) continue;
+            double w = (byte)(source[i] >> 24) / 255.0;
+            w *= w; // favour fully opaque body pixels over anti-aliased edges
+            int b = LightnessBin(hsl[i].L);
+            weight[b] += w;
+            sumS[b] += hsl[i].S * w;
+            sumL[b] += hsl[i].L * w;
+        }
+        int best = -1;
+        for (int b = 0; b < bins; b++)
+            if (weight[b] > 0 && (best < 0 || weight[b] > weight[best])) best = b;
+        return best < 0 ? (-1, 0, 0) : (best, sumS[best] / weight[best], sumL[best] / weight[best]);
     }
 
     /// <summary>
